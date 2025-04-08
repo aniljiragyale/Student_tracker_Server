@@ -1,14 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs } from "firebase/firestore";
 import emailjs from "@emailjs/browser";
 import "../styles/SharePage.css";
 import Navbar from "../components/Navbar";
 
 const SharePage = () => {
-  const [email, setEmail] = useState("");
   const [students, setStudents] = useState([]);
-  const companyCode = localStorage.getItem("companyCode"); // Now using the correct key
+  const [adminEmails, setAdminEmails] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const companyCode = localStorage.getItem("companyCode");
 
   const getToday = () => {
     const today = new Date();
@@ -21,24 +23,37 @@ const SharePage = () => {
   const todayFormatted = getToday();
 
   useEffect(() => {
-    const fetchStudents = async () => {
+    const fetchData = async () => {
       try {
-        const studentsRef = collection(db, "CorporateClient", companyCode, "studentinfo");
-        const snapshot = await getDocs(studentsRef);
+        const companyDocRef = doc(db, "CorporateClient", companyCode);
+        const companySnapshot = await getDoc(companyDocRef);
 
-        const studentList = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
+        if (companySnapshot.exists()) {
+          const data = companySnapshot.data();
+          const admins = data.adminEmails || [];
 
-        console.log("Fetched students:", studentList);
-        setStudents(studentList);
+          setAdminEmails(admins);
+
+          const studentsRef = collection(db, "CorporateClient", companyCode, "studentinfo");
+          const snapshot = await getDocs(studentsRef);
+
+          const studentList = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+
+          setStudents(studentList);
+        } else {
+          alert("Invalid company code.");
+        }
       } catch (error) {
-        console.error("Error fetching students:", error);
+        console.error("Error fetching data:", error);
+      } finally {
+        setLoading(false);
       }
     };
 
-    fetchStudents();
+    fetchData();
   }, [companyCode]);
 
   const handleShare = (e) => {
@@ -87,59 +102,53 @@ const SharePage = () => {
       })
       .join("");
 
-    const tableFooter = `
-        </tbody>
-      </table>
-    `;
+    const tableFooter = `</tbody></table>`;
 
     const messageHtml = `
       <div style="font-family: Arial, sans-serif; font-size: 14px;">
-        <p>Hello,</p>
+        <p>Hello Admin,</p>
         <p>Here is the <strong>student attendance summary</strong> for <strong>${companyCode}</strong> on <strong>${todayFormatted}</strong>:</p>
         ${tableHeader + tableRows + tableFooter}
         <p>Regards,<br/>Team</p>
       </div>
     `;
 
-    console.log("Generated Email HTML:", messageHtml);
+    adminEmails.forEach((email) => {
+      const templateParams = {
+        to_email: email,
+        message: messageHtml,
+      };
 
-    const templateParams = {
-      to_email: email,
-      message: messageHtml,
-    };
+      emailjs
+        .send(
+          "service_jbps4bn",
+          "template_wipt9rg",
+          templateParams,
+          "OGVGrLXoQYAfmldzC"
+        )
+        .then(
+          () => {
+            console.log(`Email sent to ${email}`);
+          },
+          (error) => {
+            console.error(`Failed to send email to ${email}:`, error);
+          }
+        );
+    });
 
-    emailjs
-      .send(
-        "service_jbps4bn",
-        "template_wipt9rg",
-        templateParams,
-        "OGVGrLXoQYAfmldzC"
-      )
-      .then(
-        () => {
-          alert("Email sent successfully!");
-          setEmail("");
-        },
-        (error) => {
-          console.error("Email sending failed:", error);
-          alert("Failed to send email.");
-        }
-      );
+    alert("Emails sent to all admin emails.");
   };
+
+  if (loading) {
+    return <p>Loading...</p>;
+  }
 
   return (
     <>
       <Navbar />
       <div className="share-page">
-        <h2>📤 Share Student Attendance via Email</h2>
+        <h2>📤 Send Attendance Summary to Admins</h2>
         <form onSubmit={handleShare} className="share-form">
-          <input
-            type="email"
-            placeholder="Enter recipient's email address"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
           <button type="submit">Send Email</button>
         </form>
       </div>
